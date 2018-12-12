@@ -1,0 +1,315 @@
+/*
+  This iteration uses an IR receiver to control the robot wirelessly.
+  This also has an ultrasonic sensor that checks within the walking functions
+  whether the robot has something in front of it. If there is, it will
+  reset all code and return to the reset position and stop moving.
+*/
+
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+#include "IRremote.h"
+#include "SR04.h"
+
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+
+#define TRIG_PIN 12
+#define ECHO_PIN 11
+#define SERVOMIN  110 // this is the 'minimum' pulse length count (out of 4096)
+#define SERVOMAX  555 // this is the 'maximum' pulse length count (out of 4096)
+const int receiver = 10;
+const int distanceFromObject = 5; //Distance from object in cm to halt robot.
+SR04 sr04 = SR04(ECHO_PIN,TRIG_PIN);
+long a;
+
+IRrecv irrecv(receiver);
+decode_results results;
+
+int angleToPulse(int ang)
+{
+  int pulse = map(ang,0,180,SERVOMIN,SERVOMAX);
+  return pulse;
+}
+
+class BaseLeg
+{
+  public:
+    int motor_vertical = 0;
+    int motor_horizontal = 0;
+    int v_pos = 0;
+    int h_pos = 0;
+    bool is_vertical_inverted = false;
+    BaseLeg(int v, int h) {motor_vertical = v, motor_horizontal = h;}
+    void vertical_move(int angle)
+    {
+      if(is_vertical_inverted)
+        pwm.setPWM(motor_vertical, 0, angleToPulse(180-angle));
+      else
+        pwm.setPWM(motor_vertical, 0, angleToPulse(angle));
+      v_pos = angle;
+      delay(500);
+    }
+    void up()
+    {
+      if(is_vertical_inverted)
+        pwm.setPWM(motor_vertical, 0, angleToPulse(135));
+      else
+        pwm.setPWM(motor_vertical, 0, angleToPulse(45));
+      v_pos = 45;
+      delay(500);
+    }
+    void down()
+    {
+      delay(500);
+      pwm.setPWM(motor_vertical, 0, angleToPulse(90));
+      v_pos = 90;
+    }
+    void center()
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(90));
+      h_pos = 90;
+    }
+};
+
+class LeftLeg : public BaseLeg
+{
+  public:
+    LeftLeg(int v, int h) : BaseLeg(v, h) {}
+    void horizontal_move(int angle)
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(angle));
+      h_pos = angle;
+    }
+    void forwards()
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(45));
+      h_pos = 45;
+    }
+    void backwards()
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(135));
+      h_pos = 135;
+    }
+};
+
+class RightLeg : public BaseLeg
+{
+  public:
+    RightLeg(int v, int h) : BaseLeg(v, h) {}
+    void horizontal_move(int angle)
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(180-angle));
+      h_pos = angle;
+    }
+    void forwards()
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(135));
+      h_pos = 45;
+    }
+    void backwards()
+    {
+      pwm.setPWM(motor_horizontal, 0, angleToPulse(45));
+      h_pos = 135;
+    }
+};
+
+void reset_motors()
+{
+  for(int i = 0; i < 12; i++)
+  {
+    pwm.setPWM(i, 0, angleToPulse(90));
+  }
+}
+
+int leg_rf_vertical = 0;
+int leg_rf_horizontal = 1;
+int leg_rm_vertical = 2;
+int leg_rm_horizontal = 3;
+int leg_rb_vertical = 4;
+int leg_rb_horizontal = 5;
+int leg_lf_vertical = 6;
+int leg_lf_horizontal = 7;
+int leg_lm_vertical = 8;
+int leg_lm_horizontal = 9;
+int leg_lb_vertical = 10;
+int leg_lb_horizontal = 11;
+
+RightLeg leg_rf{leg_rf_vertical, leg_rf_horizontal};
+RightLeg leg_rm(leg_rm_vertical, leg_rm_horizontal);
+RightLeg leg_rb(leg_rb_vertical, leg_rb_horizontal);
+LeftLeg leg_lf(leg_lf_vertical, leg_lf_horizontal);
+LeftLeg leg_lm(leg_lm_vertical, leg_lm_horizontal);
+LeftLeg leg_lb(leg_lb_vertical, leg_lb_horizontal);
+
+bool walk_forward = false;
+bool walk_backward = false;
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
+
+void checkDistance()
+{
+  a = sr04.Distance();
+  while(a <= distanceFromObject)
+  {
+    delay(500);
+    a = sr04.Distance();
+  }
+}
+
+void walk_forwards()
+{
+  delay(500);
+  checkDistance();
+  leg_rf.up();
+  leg_rf.forwards();
+  leg_rf.down();
+  checkDistance();
+  leg_lf.up();
+  leg_lf.forwards();
+  leg_lf.down();
+  checkDistance();
+  leg_rm.up();
+  leg_rm.forwards();
+  leg_rm.down();
+  checkDistance();
+  leg_lm.up();
+  leg_lm.forwards();
+  leg_lm.down();
+  checkDistance();
+  leg_rb.up();
+  leg_rb.forwards();
+  leg_rb.down();
+  checkDistance();
+  leg_lb.up();
+  leg_lb.forwards();
+  leg_lb.down();
+  checkDistance();
+  
+  delay(500);
+  leg_rf.backwards();
+  leg_lf.backwards();
+  leg_rm.backwards();
+  leg_lm.backwards();
+  leg_rb.backwards();
+  leg_lb.backwards();
+  checkDistance();
+}
+
+void walk_backwards()
+{
+  delay(500);
+  leg_rb.up();
+  leg_rb.backwards();
+  leg_rb.down();
+  leg_lb.up();
+  leg_lb.backwards();
+  leg_lb.down();
+  leg_rm.up();
+  leg_rm.backwards();
+  leg_rm.down();
+  leg_lm.up();
+  leg_lm.backwards();
+  leg_lm.down();
+  leg_rf.up();
+  leg_rf.backwards();
+  leg_rf.down();
+  leg_lf.up();
+  leg_lf.backwards();
+  leg_lf.down();
+  
+  delay(500);
+  leg_rf.forwards();
+  leg_lf.forwards();
+  leg_rm.forwards();
+  leg_lm.forwards();
+  leg_rb.forwards();
+  leg_lb.forwards();
+}
+
+void walk_forwards2()
+{
+  for(int i = 0; i < 6; i++) //Each motor takes a turn 
+  {
+    for(int j = 0; j < 5; j++)
+    {
+      leg_rf.horizontal_move(leg_rf.h_pos + 15);
+      leg_lf.horizontal_move(leg_lf.h_pos + 15);
+      leg_rm.horizontal_move(leg_rm.h_pos + 15);
+      leg_lm.horizontal_move(leg_lm.h_pos + 15);
+      leg_rb.horizontal_move(leg_rb.h_pos + 15);
+      leg_lb.horizontal_move(leg_lb.h_pos + 15);
+    }
+    switch(i)
+    {
+      case 0: leg_rf.forwards();
+      case 1: leg_lf.forwards();
+      case 2: leg_rm.forwards();
+      case 3: leg_lm.forwards();
+      case 4: leg_rb.forwards();
+      case 5: leg_lb.forwards();
+    }
+  }
+}
+
+void test_walk()
+{
+  for(int i = 0; i <5; i++)
+    walk_forwards();
+  reset_motors();
+  for(int i = 0; i <5; i++)
+    walk_backwards();
+  reset_motors();
+}
+
+void translateIR() // takes action based on IR code received
+{
+  switch(results.value)
+  {
+  case 0xFFA25D: resetFunc(); break;
+  case 0xFFE21D: Serial.println("FUNC/STOP"); break;
+  case 0xFF629D: Serial.println("VOL+"); break;
+  case 0xFF22DD: Serial.println("FAST BACK");    break;
+  case 0xFF02FD: reset_motors();    break;
+  case 0xFFC23D: Serial.println("FAST FORWARD");   break;
+  case 0xFFE01F: walk_backwards();    break;
+  case 0xFFA857: Serial.println("VOL-");    break;
+  case 0xFF906F: walk_forwards();    break;
+  case 0xFF9867: Serial.println("EQ");    break;
+  case 0xFFB04F: Serial.println("ST/REPT");    break;
+  case 0xFF6897: Serial.println("0");    break;
+  case 0xFF30CF: Serial.println("1");    break;
+  case 0xFF18E7: Serial.println("2");    break;
+  case 0xFF7A85: Serial.println("3");    break;
+  case 0xFF10EF: Serial.println("4");    break;
+  case 0xFF38C7: Serial.println("5");    break;
+  case 0xFF5AA5: Serial.println("6");    break;
+  case 0xFF42BD: Serial.println("7");    break;
+  case 0xFF4AB5: Serial.println("8");    break;
+  case 0xFF52AD: Serial.println("9");    break;
+  case 0xFFFFFFFF: Serial.println(" REPEAT");break;  
+  default: 
+    Serial.println(" other button   ");
+  }// End Case
+  delay(500); // Do not get immediate repeat
+}
+
+void setup() {
+  pwm.begin();
+  pwm.setPWMFreq(60);
+  Serial.begin(9600);
+  leg_lf.is_vertical_inverted = true;
+  leg_rm.is_vertical_inverted = true;
+  leg_rb.is_vertical_inverted = true;
+  irrecv.enableIRIn(); // Start the receiver
+  reset_motors();
+}
+
+void loop() {
+  //test_walk();
+  
+  if (irrecv.decode(&results)) // have we received an IR signal?
+  {
+    translateIR(); 
+    irrecv.resume(); // receive the next value
+  }  
+  
+}

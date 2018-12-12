@@ -16,7 +16,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #define ECHO_PIN 11
 #define SERVOMIN  110 // this is the 'minimum' pulse length count (out of 4096)
 #define SERVOMAX  555 // this is the 'maximum' pulse length count (out of 4096)
-const int receiver = 10;
+const int receiver = 10; //IR receiver data pin
 const int distanceFromObject = 5; //Distance from object in cm to halt robot.
 SR04 sr04 = SR04(ECHO_PIN,TRIG_PIN);
 long a;
@@ -24,6 +24,7 @@ long a;
 IRrecv irrecv(receiver);
 decode_results results;
 
+//Feed an angle to the function and it will map it onto the pulse width spectrum.
 int angleToPulse(int ang)
 {
   int pulse = map(ang,0,180,SERVOMIN,SERVOMAX);
@@ -37,7 +38,7 @@ class BaseLeg
     int motor_horizontal = 0;
     int v_pos = 0;
     int h_pos = 0;
-    bool is_vertical_inverted = false;
+    bool is_vertical_inverted = false; //Our vertical leg motors don't all face the same direction, this fixes that.
     BaseLeg(int v, int h) {motor_vertical = v, motor_horizontal = h;}
     void vertical_move(int angle)
     {
@@ -112,6 +113,7 @@ class RightLeg : public BaseLeg
     }
 };
 
+//Turns all motors to their 90 deg base position.
 void reset_motors()
 {
   for(int i = 0; i < 12; i++)
@@ -120,6 +122,7 @@ void reset_motors()
   }
 }
 
+//Define which motors connect to which PWM controller pins.
 int leg_rf_vertical = 0;
 int leg_rf_horizontal = 1;
 int leg_rm_vertical = 2;
@@ -145,6 +148,8 @@ bool walk_backward = false;
 
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
+//Check for distance from Ultrasonic sensor to nearest object. Freeze robot if
+// something comes too close, then continue when the object is removed.
 void checkDistance()
 {
   a = sr04.Distance();
@@ -155,6 +160,8 @@ void checkDistance()
   }
 }
 
+//Move each leg forwards, and then all of them back simultaneously to propel robot forwards.
+//Checks periodically for the Ultrasonic sensor distance.
 void walk_forwards()
 {
   delay(500);
@@ -225,6 +232,9 @@ void walk_backwards()
   leg_lb.forwards();
 }
 
+//This is a modified walking code, that slowly rotates all motors backwards and then
+// moves each leg forward one at a time to create continuous smooth motion. Didn't work
+// in practice, needs some tweaking.
 void walk_forwards2()
 {
   for(int i = 0; i < 6; i++) //Each motor takes a turn 
@@ -250,6 +260,7 @@ void walk_forwards2()
   }
 }
 
+//Walk forwards 5 times, and backwards 5 times to demonstrate.
 void test_walk()
 {
   for(int i = 0; i <5; i++)
@@ -260,6 +271,7 @@ void test_walk()
   reset_motors();
 }
 
+//Interprate IR codes into code funtions.
 void translateIR() // takes action based on IR code received
 {
   switch(results.value)
